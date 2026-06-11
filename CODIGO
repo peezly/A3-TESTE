@@ -1,0 +1,337 @@
+import customtkinter as ctk
+from tkinter import filedialog, messagebox
+import os
+import shutil
+import zipfile
+from datetime import datetime
+import json
+from pathlib import Path
+
+# Configuração da aparência
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
+
+class BackupApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("CloudGuard - Backup Seletivo em Nuvem")
+        self.root.geometry("900x750")
+        self.root.resizable(True, True)
+        
+        # Variáveis de controle
+        self.selected_files = []
+        self.config_file = os.path.expanduser("~/.cloudguard_config.json")
+        self.backup_history = []
+        
+        # Carregar configurações anteriores
+        self.load_config()
+        
+        # Criar interface
+        self.create_widgets()
+        self.update_listbox()
+        self.update_history_display()
+        
+    def create_widgets(self):
+        """Cria todos os elementos da interface gráfica"""
+        
+        # ===== HEADER =====
+        header_frame = ctk.CTkFrame(self.root, fg_color="#1a1a2e", height=80)
+        header_frame.pack(fill="x", padx=0, pady=0)
+        header_frame.pack_propagate(False)
+        
+        title_label = ctk.CTkLabel(
+            header_frame,
+            text="☁️ CloudGuard",
+            font=("Arial", 28, "bold"),
+            text_color="#00d4ff"
+        )
+        title_label.pack(pady=10)
+        
+        subtitle_label = ctk.CTkLabel(
+            header_frame,
+            text="Seu backup inteligente e seguro na nuvem",
+            font=("Arial", 12),
+            text_color="#888888"
+        )
+        subtitle_label.pack()
+        
+        # ===== MAIN CONTENT =====
+        main_frame = ctk.CTkFrame(self.root)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # --- SEÇÃO 1: SELEÇÃO DE ARQUIVOS ---
+        selection_frame = ctk.CTkFrame(main_frame, fg_color="#16213e", corner_radius=10)
+        selection_frame.pack(fill="x", pady=(0, 15))
+        
+        selection_title = ctk.CTkLabel(
+            selection_frame,
+            text="📁 Passo 1: Selecione seus Arquivos",
+            font=("Arial", 14, "bold"),
+            text_color="#00d4ff"
+        )
+        selection_title.pack(anchor="w", padx=15, pady=(10, 5))
+        
+        selection_desc = ctk.CTkLabel(
+            selection_frame,
+            text="Escolha quais arquivos e pastas você deseja proteger",
+            font=("Arial", 10),
+            text_color="#888888"
+        )
+        selection_desc.pack(anchor="w", padx=15, pady=(0, 10))
+        
+        button_frame = ctk.CTkFrame(selection_frame, fg_color="transparent")
+        button_frame.pack(fill="x", padx=15, pady=(0, 15))
+        
+        add_files_btn = ctk.CTkButton(
+            button_frame,
+            text="+ Adicionar Arquivos",
+            command=self.add_files,
+            fg_color="#00d4ff",
+            text_color="#000000",
+            font=("Arial", 11, "bold"),
+            width=150
+        )
+        add_files_btn.pack(side="left", padx=(0, 10))
+        
+        add_folder_btn = ctk.CTkButton(
+            button_frame,
+            text="+ Adicionar Pasta",
+            command=self.add_folder,
+            fg_color="#0099cc",
+            text_color="#ffffff",
+            font=("Arial", 11, "bold"),
+            width=150
+        )
+        add_folder_btn.pack(side="left", padx=(0, 10))
+        
+        clear_btn = ctk.CTkButton(
+            button_frame,
+            text="🗑️ Limpar Lista",
+            command=self.clear_selection,
+            fg_color="#cc0000",
+            text_color="#ffffff",
+            font=("Arial", 11, "bold"),
+            width=120
+        )
+        clear_btn.pack(side="left")
+        
+        list_label = ctk.CTkLabel(
+            selection_frame,
+            text="Arquivos Selecionados:",
+            font=("Arial", 10, "bold"),
+            text_color="#cccccc"
+        )
+        list_label.pack(anchor="w", padx=15, pady=(0, 5))
+        
+        list_frame = ctk.CTkFrame(selection_frame, fg_color="#0f3460", corner_radius=5)
+        list_frame.pack(fill="both", expand=True, padx=15, pady=(0, 15))
+        
+        self.file_listbox = ctk.CTkTextbox(
+            list_frame,
+            height=120,
+            fg_color="#0f3460",
+            text_color="#00d4ff",
+            border_color="#00d4ff",
+            border_width=1,
+            font=("Courier", 11)
+        )
+        self.file_listbox.pack(fill="both", expand=True, padx=5, pady=5)
+        self.file_listbox.configure(state="disabled")
+        
+        # --- SEÇÃO 2: ESCOLHER DESTINO ---
+        destination_frame = ctk.CTkFrame(main_frame, fg_color="#16213e", corner_radius=10)
+        destination_frame.pack(fill="x", pady=(0, 15))
+        
+        destination_title = ctk.CTkLabel(
+            destination_frame,
+            text="🎯 Passo 2: Escolha o Destino do Backup",
+            font=("Arial", 14, "bold"),
+            text_color="#00d4ff"
+        )
+        destination_title.pack(anchor="w", padx=15, pady=(10, 10))
+        
+        radio_frame = ctk.CTkFrame(destination_frame, fg_color="transparent")
+        radio_frame.pack(fill="x", padx=15, pady=(0, 15))
+        
+        self.destination_var = ctk.StringVar(value="local")
+        
+        local_radio = ctk.CTkRadioButton(
+            radio_frame,
+            text="💾 Armazenamento Local (Sua Máquina)",
+            variable=self.destination_var,
+            value="local",
+            font=("Arial", 11),
+            text_color="#cccccc"
+        )
+        local_radio.pack(anchor="w", pady=5)
+        
+        cloud_radio = ctk.CTkRadioButton(
+            radio_frame,
+            text="☁️ Nuvem (Simulado - AWS / GCloud)",
+            variable=self.destination_var,
+            value="cloud",
+            font=("Arial", 11),
+            text_color="#cccccc"
+        )
+        cloud_radio.pack(anchor="w", pady=5)
+        
+        # --- SEÇÃO 3: EXECUTAR BACKUP ---
+        action_frame = ctk.CTkFrame(main_frame, fg_color="#16213e", corner_radius=10)
+        action_frame.pack(fill="x", pady=(0, 15))
+        
+        action_title = ctk.CTkLabel(
+            action_frame,
+            text="⚡ Passo 3: Executar Backup",
+            font=("Arial", 14, "bold"),
+            text_color="#00d4ff"
+        )
+        action_title.pack(anchor="w", padx=15, pady=(10, 15))
+        
+        action_btn_frame = ctk.CTkFrame(action_frame, fg_color="transparent")
+        action_btn_frame.pack(fill="x", padx=15, pady=(0, 15))
+        
+        backup_btn = ctk.CTkButton(
+            action_btn_frame,
+            text="🚀 Iniciar Backup Agora",
+            command=self.start_backup,
+            fg_color="#00d4ff",
+            text_color="#000000",
+            font=("Arial", 12, "bold"),
+            height=40,
+            corner_radius=8
+        )
+        backup_btn.pack(fill="x")
+        
+        # --- SEÇÃO 4: HISTÓRICO ---
+        history_frame = ctk.CTkFrame(main_frame, fg_color="#16213e", corner_radius=10)
+        history_frame.pack(fill="both", expand=True, pady=(0, 0))
+        
+        history_title = ctk.CTkLabel(
+            history_frame,
+            text="📋 Histórico de Backups",
+            font=("Arial", 14, "bold"),
+            text_color="#00d4ff"
+        )
+        history_title.pack(anchor="w", padx=15, pady=(10, 5))
+        
+        self.history_box = ctk.CTkTextbox(
+            history_frame,
+            fg_color="#0f3460",
+            text_color="#ffffff",
+            font=("Courier", 11)
+        )
+        self.history_box.pack(fill="both", expand=True, padx=15, pady=(0, 15))
+        self.history_box.configure(state="disabled")
+
+    # ===== MÉTODOS DE BACKEND =====
+
+    def add_files(self):
+        """Abre seletor para múltiplos arquivos"""
+        files = filedialog.askopenfilenames(title="Selecione os arquivos")
+        if files:
+            for file in files:
+                if file not in self.selected_files:
+                    self.selected_files.append(file)
+            self.update_listbox()
+
+    def add_folder(self):
+        """Abre seletor para uma pasta"""
+        folder = filedialog.askdirectory(title="Selecione uma pasta")
+        if folder:
+            if folder not in self.selected_files:
+                self.selected_files.append(folder)
+            self.update_listbox()
+
+    def clear_selection(self):
+        """Limpa a lista de arquivos selecionados"""
+        self.selected_files.clear()
+        self.update_listbox()
+
+    def update_listbox(self):
+        """Atualiza a caixa de texto com os itens selecionados"""
+        self.file_listbox.configure(state="normal")
+        self.file_listbox.delete("1.0", "end")
+        if not self.selected_files:
+            self.file_listbox.insert("end", "Nenhum arquivo ou pasta selecionado.")
+        else:
+            for item in self.selected_files:
+                self.file_listbox.insert("end", f"{item}\n")
+        self.file_listbox.configure(state="disabled")
+
+    def start_backup(self):
+        """Executa a rotina de compactação e salvamento do backup"""
+        if not self.selected_files:
+            messagebox.showwarning("Aviso", "Selecione pelo menos um arquivo ou pasta!")
+            return
+            
+        # Define pasta de destino padrão
+        dest_dir = filedialog.askdirectory(title="Selecione onde salvar o arquivo de backup")
+        if not dest_dir:
+            return
+            
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_filename = f"backup_{timestamp}.zip"
+        full_backup_path = os.path.join(dest_dir, backup_filename)
+        
+        try:
+            # Cria o arquivo ZIP
+            with zipfile.ZipFile(full_backup_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for item in self.selected_files:
+                    path = Path(item)
+                    if path.is_file():
+                        zipf.write(path, path.name)
+                    elif path.is_dir():
+                        for root, _, files in os.walk(path):
+                            for file in files:
+                                file_path = Path(root) / file
+                                archive_name = file_path.relative_to(path.parent)
+                                zipf.write(file_path, archive_name)
+                                
+            dest_type = self.destination_var.get()
+            log_msg = f"[{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}] Backup criado com sucesso ({dest_type.upper()})."
+            
+            if dest_type == "cloud":
+                log_msg += " (Simulado: Enviado para a Nuvem)"
+                
+            self.backup_history.append(log_msg)
+            self.save_config()
+            self.update_history_display()
+            
+            messagebox.showinfo("Sucesso", f"Backup concluído!\nSalvo em: {full_backup_path}")
+            
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha ao realizar o backup:\n{str(e)}")
+
+    def update_history_display(self):
+        """Atualiza a caixa de histórico visual"""
+        self.history_box.configure(state="normal")
+        self.history_box.delete("1.0", "end")
+        if not self.backup_history:
+            self.history_box.insert("end", "Nenhum backup realizado ainda.")
+        else:
+            for entry in reversed(self.backup_history):
+                self.history_box.insert("end", f"{entry}\n")
+        self.history_box.configure(state="disabled")
+
+    def load_config(self):
+        """Carrega o histórico de backups salvo no JSON do usuário"""
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.backup_history = data.get("history", [])
+            except:
+                self.backup_history = []
+
+    def save_config(self):
+        """Salva o histórico atual no arquivo JSON do usuário"""
+        try:
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump({"history": self.backup_history}, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"Erro ao salvar configurações: {e}")
+
+if __name__ == "__main__":
+    root = ctk.CTk()
+    app = BackupApp(root)
+    root.mainloop()
